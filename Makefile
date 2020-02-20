@@ -19,9 +19,12 @@ EXTRA_CFLAGS=-fno-pic
 CC=$(CROSS_COMPILE)gcc
 LD=$(CROSS_COMPILE)ld
 
+OBJDUMP=arm-linux-gnueabihf-objdump
+
 all:
 	make -C $(KERNEL_DIR) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) M=$(PWD) modules
+	$(OBJDUMP)  -D -S --show-raw-insn --prefix-addresses --line-number $(MODULE_NAME).ko >objdump
 clean:
 	make -C $(KERNEL_DIR) M=$(pwd) clean
-	rm -rf *.o .*.cmd *.cmd *.ko *.mod.c .tmp_versions *.order *.symvers 
+	rm -rf *.o .*.cmd *.cmd *.ko *.mod.c .tmp_versions *.order *.symvers objdump
 

@@ -5,7 +5,7 @@
 struct timespec start_time;
 int task_stop;
 static atomic_t key;
-static atomic_t vma_seq_key;
+unsigned int worker_op;
 
 // for diff log
 static page_buf *cache_memory;
@@ -44,7 +44,7 @@ typedef struct _trace_data {
 } trace_data;
 
 
-#define MY_RB_SIZE 4096
+#define MY_RB_SIZE 16384
 DEFINE_SPINLOCK(rbuf_lock);
 typedef struct _ring_buf {
 	trace_data items[MY_RB_SIZE];
@@ -166,8 +166,7 @@ bool rbuf_not_empty(trace_ring_buf *_rbuf)
 int trace_rb_pop_all(trace_ring_buf *_rbuf)
 {
 	trace_meta *meta;
-	int len, idx;
-//	int i;
+	int len, idx, i;
 	char msg[500];
 	unsigned char *data;
 
@@ -181,71 +180,77 @@ int trace_rb_pop_all(trace_ring_buf *_rbuf)
 		meta = &_rbuf->items[idx].meta;
 		data = _rbuf->items[idx].data_ptr;
 		if (data) {
-			/* 4k page granule */
-//			for (i=0; i<meta->nr_pages; i++,data+=PAGE_SIZE) {
-				
-				/* for diff log */
-//				diff_total = check_cache(data, meta->bi_sector+i*8, &diff_logs);
-//				if (diff_total>0) {
-//					memset(msg, '\0', sizeof msg);
-//					sprintf(msg,"vma_trace,dif,%d,%s,%s,%c,%lu,%d,%d,%d,%d,%d,%d\n",
-//						meta->seq, meta->filename, meta->devname,
-//						meta->RW, meta->bi_sector, i, diff_total,
-//						diff_interval[0],diff_interval[1],
-//						diff_interval[2],diff_interval[3]);
-//					printk("%s", msg);
-//				}
-//				diff_interval[0]=0;
-//				diff_interval[1]=0;
-//				diff_interval[2]=0;
-//				diff_interval[3]=0;
+			if (worker_op==BIO_COMPRESS) {
+				lzo_dst_len=0;
+				lzo_dst=vmalloc(lzo1x_worst_compress(meta->nr_pages*PAGE_SIZE));
+				lzo1x_1_compress(data,PAGE_SIZE*meta->nr_pages,lzo_dst,&lzo_dst_len,lzo_wrkmem);
+				memset(msg, '\0', sizeof msg);
+				sprintf(msg,"vma_trace,full_bio_lzo,%d,%s,%s,%c,%lu,%d,%d\n",
+					meta->seq, meta->filename, meta->devname,
+					meta->RW, meta->bi_sector, meta->nr_pages, lzo_dst_len);
+				printk("%s", msg);
+			} else {
+				for (i=0; i<meta->nr_pages; i++,data+=PAGE_SIZE) {
+					switch(worker_op) {
+					case SHA1:
+						/* 4k sha1 */
+						compute_sha( data, PAGE_SIZE, sha1);
+						char_to_hex( sha1, sha1_hex, SHA1HashSize);
+						/* 2k sha1 */
+						compute_sha( data, PAGE_SIZE>>1, sha1);
+						char_to_hex( sha1, sha1_hex_2k[0], SHA1HashSize);
+						compute_sha( data+(PAGE_SIZE>>1), PAGE_SIZE>>1, sha1);
+						char_to_hex( sha1, sha1_hex_2k[1], SHA1HashSize);
+						/* 1k sha1 */
+						compute_sha( data, PAGE_SIZE>>2, sha1);
+						char_to_hex( sha1, sha1_hex_1k[0], SHA1HashSize);
+						compute_sha( data+(PAGE_SIZE>>2), PAGE_SIZE>>2, sha1);
+						char_to_hex( sha1, sha1_hex_1k[1], SHA1HashSize);
+						compute_sha( data+(PAGE_SIZE>>2)*2, PAGE_SIZE>>2, sha1);
+						char_to_hex( sha1, sha1_hex_1k[2], SHA1HashSize);
+						compute_sha( data+(PAGE_SIZE>>2)*3, PAGE_SIZE>>2, sha1);
+						char_to_hex( sha1, sha1_hex_1k[3], SHA1HashSize);
+						memset(msg, '\0', sizeof msg);
+						sprintf(msg,"vma_trace,sha,%d,%s,%s,%c,%lu,%d,%s,%s,%s,%s,%s,%s,%s\n",
+							meta->seq, meta->filename, meta->devname,
+							meta->RW, meta->bi_sector, i, sha1_hex,
+							sha1_hex_2k[0],sha1_hex_2k[1],
+							sha1_hex_1k[0],sha1_hex_1k[1],
+							sha1_hex_1k[2],sha1_hex_1k[3]);
+						printk("%s", msg);
+						break;
 
-				/* for lzo compress */
-//				lzo_dst_len=0;
-//				lzo1x_1_compress(data,PAGE_SIZE,lzo_dst,&lzo_dst_len,lzo_wrkmem);
-//				memset(msg, '\0', sizeof msg);
-//				sprintf(msg,"vma_trace,lzo,%d,%s,%s,%c,%lu,%d,%d\n",
-//					meta->seq, meta->filename, meta->devname,
-//					meta->RW, meta->bi_sector, i, lzo_dst_len);
-//				printk("%s", msg);
+					case PG_COMPRESS:
+						lzo_dst_len=0;
+						lzo1x_1_compress(data,PAGE_SIZE,lzo_dst,&lzo_dst_len,lzo_wrkmem);
+						memset(msg, '\0', sizeof msg);
+						sprintf(msg,"vma_trace,lzo,%d,%s,%s,%c,%lu,%d,%d\n",
+							meta->seq, meta->filename, meta->devname,
+							meta->RW, meta->bi_sector, i, lzo_dst_len);
+						printk("%s", msg);
+						break;
 
-				/* for 4k/2k/1k-sha */
-				/* calculate 4k sha1 */
-//				compute_sha( data, PAGE_SIZE, sha1);
-//				char_to_hex( sha1, sha1_hex, SHA1HashSize);
-				/* calculate 2k sha1 */
-//				compute_sha( data, PAGE_SIZE>>1, sha1);
-//				char_to_hex( sha1, sha1_hex_2k[0], SHA1HashSize);
-//				compute_sha( data+(PAGE_SIZE>>1), PAGE_SIZE>>1, sha1);
-//				char_to_hex( sha1, sha1_hex_2k[1], SHA1HashSize);
-				/* calculate 1k sha1 */
-//				compute_sha( data, PAGE_SIZE>>2, sha1);
-//				char_to_hex( sha1, sha1_hex_1k[0], SHA1HashSize);
-//				compute_sha( data+(PAGE_SIZE>>2), PAGE_SIZE>>2, sha1);
-//				char_to_hex( sha1, sha1_hex_1k[1], SHA1HashSize);
-//				compute_sha( data+(PAGE_SIZE>>2)*2, PAGE_SIZE>>2, sha1);
-//				char_to_hex( sha1, sha1_hex_1k[2], SHA1HashSize);
-//				compute_sha( data+(PAGE_SIZE>>2)*3, PAGE_SIZE>>2, sha1);
-//				char_to_hex( sha1, sha1_hex_1k[3], SHA1HashSize);
-//				memset(msg, '\0', sizeof msg);
-//				sprintf(msg,"vma_trace,sha,%d,%s,%s,%c,%lu,%d,%s,%s,%s,%s,%s,%s,%s\n",
-//					meta->seq, meta->filename, meta->devname,
-//					meta->RW, meta->bi_sector, i, sha1_hex,
-//					sha1_hex_2k[0],sha1_hex_2k[1],
-//					sha1_hex_1k[0],sha1_hex_1k[1],
-//					sha1_hex_1k[2],sha1_hex_1k[3]);
-//				printk("%s", msg);
-//			}
+					case DIFF:
+						diff_total = check_cache(data, meta->bi_sector+i*8, &diff_logs);
+						if (diff_total>0) {
+							memset(msg, '\0', sizeof msg);
+							sprintf(msg,"vma_trace,dif,%d,%s,%s,%c,%lu,%d,%d,%d,%d,%d,%d\n",
+							meta->seq, meta->filename, meta->devname,
+							meta->RW, meta->bi_sector, i, diff_total,
+							diff_interval[0],diff_interval[1],
+							diff_interval[2],diff_interval[3]);
+							printk("%s", msg);
+						}
+						diff_interval[0]=0;
+						diff_interval[1]=0;
+						diff_interval[2]=0;
+						diff_interval[3]=0;
+						break;
+					}
+				}
+			}
 
-			/* full bio pages granule compress*/
-			lzo_dst_len=0;
-			lzo_dst=vmalloc(lzo1x_worst_compress(meta->nr_pages*PAGE_SIZE));
-			lzo1x_1_compress(data,PAGE_SIZE*meta->nr_pages,lzo_dst,&lzo_dst_len,lzo_wrkmem);
-			memset(msg, '\0', sizeof msg);
-			sprintf(msg,"vma_trace,full_bio_lzo,%d,%s,%s,%c,%lu,%d,%d\n",
-				meta->seq, meta->filename, meta->devname,
-				meta->RW, meta->bi_sector, meta->nr_pages, lzo_dst_len);
-			printk("%s", msg);
+			// release data
 			vfree(lzo_dst);
 			vfree(_rbuf->items[idx].data_ptr);
 			_rbuf->items[idx].data_ptr=NULL;
@@ -275,45 +280,56 @@ static int anon_page_dump(struct page *pg, int seq){
 	// dump info
 	pid_t pid, ppid;
 	char task_comm[TASK_COMM_LEN], msg[700];
-	char f_name[256];
+	char vm_file_name[256];
+	int has_map=0;
 
+	// get anon_vma
 	anon_mapping = (unsigned long) ACCESS_ONCE(pg->mapping);
-	if((anon_mapping & PAGE_MAPPING_FLAGS)!=PAGE_MAPPING_ANON){
-		printk("vma_trace,ERR,7,not anon mapping\n");
+	if ((anon_mapping & PAGE_MAPPING_FLAGS)!=PAGE_MAPPING_ANON)
 		return -1;
-	}
 	av = (struct anon_vma *) (anon_mapping - PAGE_MAPPING_ANON);
 	
 	anon_vma_interval_tree_foreach(avc, &av->rb_root, pgoff, pgoff) {
-		vma = avc->vma;
-		mm = vma->vm_mm;
+		// get pte and ptl
+		vma     = avc->vma;
+		mm      = vma->vm_mm;
 		address = vma_address(pg,vma);
-		pmd = mm_find_pmd(mm,address);
-		pte=pte_offset_map(pmd,address);
-		ptl = pte_lockptr(mm,pmd);
+		pmd     = mm_find_pmd(mm,address);
+		pte     = pte_offset_map(pmd,address);
+		ptl     = pte_lockptr(mm,pmd);
 
+		// get swap_entry_t from pte
 		spin_lock(ptl);
 		arch_entry = __pte_to_swp_entry(*pte);
 		spin_unlock(ptl);
-		
 		swap_entry = swp_entry(__swp_type(arch_entry),__swp_offset(arch_entry));
-		if(swap_entry.val == page_private(pg)){
-			get_task_comm(task_comm,mm->owner);
-			pid = mm->owner->pid;
+
+		// compare swap_entry_t in pte and page
+		if (swap_entry.val == page_private(pg)) {
+
+			pid  = mm->owner->pid;
 			ppid = mm->owner->parent->pid;
-			memset(f_name, '\0', sizeof f_name);
-			if(vma->vm_file){
-				sprintf(f_name,"%s",vma->vm_file->f_path.dentry->d_name.name);
-			} else{
-				sprintf(f_name,"[anon]");
+			get_task_comm(task_comm,mm->owner);
+			memset(vm_file_name, '\0', sizeof vm_file_name);
+			if (vma->vm_file) {
+				sprintf(vm_file_name,"%s",
+						vma->vm_file->f_path.dentry->d_name.name);
+			} else {
+				sprintf(vm_file_name,"[anon]");
 			}
+
 			memset(msg, '\0', sizeof msg);
-			sprintf(msg,"vma_trace,vma,%d,%d,%d,%s,%s,%lx,%lx\n",
-					seq,pid,ppid,task_comm,f_name,
-					vma->vm_start,vma->vm_end);
+			sprintf(msg, "vma_trace,vma,%d,%d,%d,%s,%s,%lx,%lx\n",
+					seq, pid, ppid, task_comm, vm_file_name,
+					vma->vm_start, vma->vm_end);
 			printk(msg);
+			has_map=1;
 		}
 	}
+
+	if (!has_map)
+		return -2;
+
 	return 0;
 }
 
@@ -324,9 +340,9 @@ static int bio_log(int rw,struct bio *bio)
 	trace_meta meta;
 	int local_key;
 	char msg[500];
-	//unsigned char *data;
-	//struct bio_vec *bvec;
-	//int i
+	unsigned char *data;
+	struct bio_vec *bvec;
+	int i,ret;
 
 	// set trace_meta
 	local_key = atomic_read(&key);
@@ -357,7 +373,7 @@ static int bio_log(int rw,struct bio *bio)
 		meta.nr_pages,meta.filename);
 	printk(msg);
 
-	/*
+	// we only care about swap out page
 	if(meta.RW!='w') return 0;
 	if( meta.devname[0]!='d' || meta.devname[1]!='m' ||
 		meta.devname[2]!='-' || meta.devname[3]!='3')
@@ -365,36 +381,42 @@ static int bio_log(int rw,struct bio *bio)
 		return 0;
 	}
 
-	// allocate and copy page data
-	data = vmalloc(meta.nr_pages*PAGE_SIZE);
-	if (!data) {
-		printk("vma_trace,ERR,3,vmalloc data fail\n");
-		return -1;
-	}
+	// dump vma info
+	// there are at most 128 or 256 pages in one bio
+	// so we use (key<<8 + page index in bio) to identify
 	__bio_for_each_segment(bvec,bio,i,0) {
-		if (i>=meta.nr_pages) {
-			printk("vma_trace,ERR,4,iterate page fault\n");
-			break;
+		ret=anon_page_dump(bvec->bv_page, (local_key<<8)+i);
+		if (ret<0) {
+			printk("vma_trace,ERR,7,%d\n",-ret);
+			return 0;
 		}
-		get_page_data(bvec->bv_page, data+i*PAGE_SIZE);
 	}
 
-	if (push_rbuf_uninterruptable(data,&meta, &rbuf)) {
-		vfree(data);
-		return -1;
+	if (worker_op) {
+		// allocate data for store swap out page
+		// worker will do sha1 or compress on data later
+		data = vmalloc(meta.nr_pages*PAGE_SIZE);
+		if (!data) {
+			printk("vma_trace,ERR,3,vmalloc data fail\n");
+			return 0;
+		}
+		__bio_for_each_segment(bvec,bio,i,0) {
+			get_page_data(bvec->bv_page, data+i*PAGE_SIZE);
+		}
+		if (push_rbuf_uninterruptable(data, &meta, &rbuf)) {
+			vfree(data);
+			return 0;
+		}
+		wake_up(&trace_wq);
 	}
-	wake_up(&trace_wq);
-	*/
+
 	return 0;
 }
 static int req_log(struct request *req)
 {
 	trace_meta meta;
 	struct bio *bio=req->bio;
-	struct bio_vec *bvec;
-	unsigned char *data;
 	char msg[300];
-	int i, local_key;
 
 	// set trace_meta
 	meta.seq = bio->trace_seq;
@@ -430,34 +452,6 @@ static int req_log(struct request *req)
 		return 0;
 	}
 
-
-	// vma reverse map
-	__bio_for_each_segment(bvec,bio,i,0) {
-		local_key = atomic_read(&vma_seq_key);
-		local_key = atomic_cmpxchg(&vma_seq_key, local_key, local_key+1);
-		anon_page_dump(bvec->bv_page, local_key);
-	}
-/*
-	// allocate and copy page data
-	data = vmalloc(meta.nr_pages*PAGE_SIZE);
-	if (!data) {
-		printk("vma_trace,ERR,3,vmalloc data fail\n");
-		return -1;
-	}
-	__bio_for_each_segment(bvec,bio,i,0) {
-		if (i>=meta.nr_pages) {
-			printk("vma_trace,ERR,4,iterate page fault\n");
-			break;
-		}
-		get_page_data(bvec->bv_page, data+i*PAGE_SIZE);
-	}
-
-	if (push_rbuf_uninterruptable(data,&meta, &rbuf)) {
-		vfree(data);
-		return -1;
-	}
-	wake_up(&trace_wq);
-*/
 	return 0;
 }
 
@@ -546,6 +540,12 @@ static int init_main(void)
 {
 	int ret;
 	int num_cpu = num_online_cpus();
+
+	if (worker_op>=NR_OPS) {
+		printk("vma_trace,worker op fail!\n");
+		goto fail;
+	}
+
 	atomic_set(&key, 0);
 	diff_interval[0]=0;
 	diff_interval[1]=0;
@@ -553,6 +553,7 @@ static int init_main(void)
 	diff_interval[3]=0;
 	trace_flag = 0;
 	start_time = current_kernel_time();
+	
 	ret = init_netlink();
 	if (ret<0||num_cpu<0) {
 		goto fail;
@@ -578,7 +579,7 @@ fail:
 	return -EBUSY;
 }
 
-
+module_param(worker_op, uint, 0);
 module_init(init_main);
 module_exit(cleanup_main);
 MODULE_LICENSE("GPL");

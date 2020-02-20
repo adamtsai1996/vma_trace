@@ -1,7 +1,7 @@
 #include<linux/kernel.h>
 #include<linux/init.h>
 #include<linux/module.h>
-
+#include<linux/moduleparam.h>
 
 
 #include<asm/uaccess.h>
@@ -54,6 +54,14 @@ typedef struct {
 }page_buf;
 extern int diff_interval[4];
 
+enum {
+	NONE,
+	SHA1,
+	PG_COMPRESS,
+	BIO_COMPRESS,
+	DIFF,
+	NR_OPS
+};
 
 
 void get_page_filename(struct page *page, char* output);
