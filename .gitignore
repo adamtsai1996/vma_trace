@@ -1,0 +1,13 @@
+# tmp file
+.*.swp
+
+# kernel module build related
+*.o
+.*.cmd
+*.cmd
+*.ko
+*.mod.c
+.tmp_versions
+*.order
+*.symvers
+
