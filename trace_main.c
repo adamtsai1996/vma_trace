@@ -182,13 +182,14 @@ int trace_rb_pop_all(trace_ring_buf *_rbuf)
 		if (data) {
 			if (worker_op==BIO_COMPRESS) {
 				lzo_dst_len=0;
-				lzo_dst=vmalloc(lzo1x_worst_compress(meta->nr_pages*PAGE_SIZE));
-				lzo1x_1_compress(data,PAGE_SIZE*meta->nr_pages,lzo_dst,&lzo_dst_len,lzo_wrkmem);
+				lzo_dst=vmalloc(lzo1x_worst_compress((meta->nr_pages)*PAGE_SIZE));
+				lzo1x_1_compress(data,(meta->nr_pages)*PAGE_SIZE,lzo_dst,&lzo_dst_len,lzo_wrkmem);
 				memset(msg, '\0', sizeof msg);
 				sprintf(msg,"vma_trace,full_bio_lzo,%d,%s,%s,%c,%lu,%d,%d\n",
 					meta->seq, meta->filename, meta->devname,
 					meta->RW, meta->bi_sector, meta->nr_pages, lzo_dst_len);
 				printk("%s", msg);
+				vfree(lzo_dst);
 			} else {
 				for (i=0; i<meta->nr_pages; i++,data+=PAGE_SIZE) {
 					switch(worker_op) {
@@ -222,12 +223,14 @@ int trace_rb_pop_all(trace_ring_buf *_rbuf)
 
 					case PG_COMPRESS:
 						lzo_dst_len=0;
+						lzo_dst=vmalloc(lzo1x_worst_compress(PAGE_SIZE));
 						lzo1x_1_compress(data,PAGE_SIZE,lzo_dst,&lzo_dst_len,lzo_wrkmem);
 						memset(msg, '\0', sizeof msg);
 						sprintf(msg,"vma_trace,lzo,%d,%s,%s,%c,%lu,%d,%d\n",
 							meta->seq, meta->filename, meta->devname,
 							meta->RW, meta->bi_sector, i, lzo_dst_len);
 						printk("%s", msg);
+						vfree(lzo_dst);
 						break;
 
 					case DIFF:
@@ -251,7 +254,6 @@ int trace_rb_pop_all(trace_ring_buf *_rbuf)
 			}
 
 			// release data
-			vfree(lzo_dst);
 			vfree(_rbuf->items[idx].data_ptr);
 			_rbuf->items[idx].data_ptr=NULL;
 		}
